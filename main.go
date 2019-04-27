@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"os"
 
 	yaml "gopkg.in/yaml.v2"
 
@@ -49,6 +50,10 @@ func main() {
 	http.Handle("/", r)
 
 	log.Printf("listening for requests at %s", port)
+	bp := os.Getenv("BLOGPATH")
+	if bp == "" {
+		log.Fatal("environment variable BLOGPATH must be set")
+	}
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
@@ -70,7 +75,7 @@ func refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadFiles() error {
-	files, err := ioutil.ReadDir("./")
+	files, err := ioutil.ReadDir(os.Getenv("BLOGPATH"))
 	if err != nil {
 		return err
 	}
