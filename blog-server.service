@@ -13,7 +13,7 @@ Restart=on-failure
 RestartSec=10
 startLimitIntervalSec=60
 
-WorkingDirectory=/home/pi/doc/blog
+WorkingDirectory=/home/gitwatch/blog
 ExecStart=/home/pi/prj/go/bin/blog-server
 
 # make sure log directory exists and owned by syslog
