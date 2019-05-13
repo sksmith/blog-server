@@ -33,6 +33,7 @@ type Post struct {
 	Content  string
 }
 
+// Tags contains all tags associated with blog posts
 var Tags []string
 
 // Posts contains all blog posts
@@ -49,6 +50,11 @@ func main() {
 	var wait time.Duration
 	flag.DurationVar(&wait, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
 	flag.Parse()
+
+	bp := os.Getenv("BLOGPATH")
+	if bp == "" {
+		log.Fatal("environment variable BLOGPATH must be set")
+	}
 
 	log.Println("loading files...")
 	loadFiles()
@@ -163,8 +169,7 @@ func refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadFiles() error {
-	blogpath := os.Getenv("BLOGPATH")
-	files, err := ioutil.ReadDir(blogpath + "/")
+	files, err := ioutil.ReadDir(os.Getenv("BLOGPATH"))
 	if err != nil {
 		return err
 	}
