@@ -24,13 +24,14 @@ import (
 
 // Post is a single blog post
 type Post struct {
-	Title    string
-	Subtitle string
-	Author   string
-	Created  time.Time
-	Edited   time.Time
-	Tags     []string
-	Content  string
+	Title          string
+	Subtitle       string
+	Author         string
+	Created        time.Time
+	Edited         time.Time
+	Tags           []string
+	ContentPreview string
+	Content        string
 }
 
 // Tags contains all tags associated with blog posts
@@ -187,13 +188,13 @@ func loadFiles() error {
 			continue
 		}
 
-		data, err := ioutil.ReadFile(blogpath + "/" + f.Name())
+		data, err := ioutil.ReadFile(os.Getenv("BLOGPATH") + "/" + f.Name())
 		if err != nil {
 			log.Printf("unable to read file: %s; error: %v\n", f.Name(), err)
 			continue
 		}
 
-		metaData, body, err := splitMetadata(data)
+		metaData, bodyPreview, body, err := splitMetadata(data)
 		if err != nil || len(metaData) == 0 {
 			log.Printf("unable to split metadata for file: %s; error: %v\n", f.Name(), err)
 			continue
@@ -208,6 +209,11 @@ func loadFiles() error {
 
 		for _, tag := range post.Tags {
 			TagMap[tag] = true
+		}
+
+		if len(bodyPreview) > 0 {
+			bodyPreview = blackfriday.MarkdownCommon(bodyPreview)
+			post.ContentPreview = base64.StdEncoding.EncodeToString(bodyPreview)
 		}
 
 		body = blackfriday.MarkdownCommon(body)
@@ -257,22 +263,29 @@ func sortposts(posts []*Post) []*Post {
 
 const metaStartTag = "<!--META--"
 const metaEndTag = "--END-->"
+const breakTag = "<!--BREAK-->"
 
-func splitMetadata(data []byte) ([]byte, []byte, error) {
+func splitMetadata(data []byte) ([]byte, []byte, []byte, error) {
 	if data == nil || len(data) == 0 {
-		return nil, nil, errors.New("no content in post")
+		return nil, nil, nil, errors.New("no content in post")
 	}
 	text := string(data)
 	metaEndIdx := strings.Index(text, metaEndTag)
+	breakTagIdx := strings.Index(text, breakTag)
 
 	meta := ""
 	body := text
+	var bodyPreview string
 	if strings.HasPrefix(text, metaStartTag) && metaEndIdx >= 0 {
 		meta = text[len(metaStartTag):metaEndIdx]
 		body = text[metaEndIdx+len(metaEndTag):]
 
+		if breakTagIdx > -1 {
+			bodyPreview = text[metaEndIdx+len(metaEndTag) : breakTagIdx]
+		}
+
 		meta = strings.TrimSpace(meta)
 		body = strings.TrimSpace(body)
 	}
-	return []byte(meta), []byte(body), nil
+	return []byte(meta), []byte(bodyPreview), []byte(body), nil
 }
