@@ -27,6 +27,7 @@ type Post struct {
 	Title          string
 	Subtitle       string
 	Author         string
+	Path           string
 	Created        time.Time
 	Edited         time.Time
 	Tags           []string
@@ -43,7 +44,7 @@ var Posts []*Post
 // PostMap contains all posts in 2006-01-02 format
 var PostMap map[string]*Post
 
-const port = "8080"
+const port = "8081"
 
 // following gorilla/mux's recommendations on best practices for
 // app server startup
@@ -52,8 +53,7 @@ func main() {
 	flag.DurationVar(&wait, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
 	flag.Parse()
 
-	bp := os.Getenv("BLOGPATH")
-	if bp == "" {
+	if os.Getenv("BLOGPATH") == "" {
 		log.Fatal("environment variable BLOGPATH must be set")
 	}
 
@@ -217,6 +217,7 @@ func loadFiles() error {
 		}
 
 		body = blackfriday.MarkdownCommon(body)
+		post.Path = post.Created.Format("/posts/2006/01/02")
 		post.Content = base64.StdEncoding.EncodeToString(body)
 
 		Posts = append(Posts, post)
