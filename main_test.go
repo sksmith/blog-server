@@ -5,11 +5,11 @@ import (
 )
 
 func TestSplitMetadataEmpty(t *testing.T) {
-	_, _, err := splitMetadata(nil)
+	_, _, _, err := splitMetadata(nil)
 	if err == nil {
 		t.Error("expected error, not none")
 	}
-	_, _, err = splitMetadata([]byte(""))
+	_, _, _, err = splitMetadata([]byte(""))
 	if err == nil {
 		t.Error("expected error, got none")
 	}
@@ -23,7 +23,7 @@ author: Sean K Smith
 `)
 	expMetaTxt := `author: Sean K Smith`
 	expBodyTxt := `# My First Blog Post`
-	meta, body, err := splitMetadata(data)
+	meta, _, body, err := splitMetadata(data)
 
 	if err != nil {
 		t.Fatalf("parseMetadata(body) got unexpected error: %v", err)
@@ -46,7 +46,7 @@ func TestSplitMetadataNoMeta(t *testing.T) {
 	const expBodyTxt = metaStartTag + "some garbo text <=|= there is no meta in this text"
 
 	data := []byte(expBodyTxt)
-	meta, body, err := splitMetadata(data)
+	meta, _, body, err := splitMetadata(data)
 
 	if err != nil {
 		t.Fatalf("parseMetadata(\"%s\") got unexpected error: %v", string(data), err)
