@@ -79,7 +79,7 @@ func main() {
 	log.Printf("listening for requests at %s", port)
 
 	go func() {
-		if err := srv.ListenAndServeTLS(os.Getenv("BLOG_SERVER_CERT"), os.Getenv("BLOG_SERVER_KEY")); err != nil {
+		if err := srv.ListenAndServe(); err != nil {
 			log.Println(err)
 		}
 	}()
