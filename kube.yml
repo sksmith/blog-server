@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blog-server
+  labels:
+    app: blog-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: blog-server
+  template:
+    metadata:
+      labels:
+        app: blog-server
+    spec:
+      containers:
+      - name: blog-frontend
+        image: docker.seanksmith.me/blog-server:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+      imagePullSecrets:
+      - name: regcred
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blog-server-service
+spec:
+  selector:
+    app: blog-server
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
