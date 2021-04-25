@@ -2,25 +2,43 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"html/template"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/gorilla/mux"
-	"github.com/russross/blackfriday"
+	"github.com/russross/blackfriday/v2"
+	"github.com/sksmith/blog-server/views"
 )
+
+type RepoFile struct {
+	Name        string `json:"name"`
+	DownloadUrl string `json:"download_url"`
+}
+
+type PostFile struct {
+	Name    string
+	Content []byte
+}
+
+type IndexModel struct {
+	PreviousPage int
+	NextPage     int
+	Posts        []*Post
+	Tags         []string
+}
 
 // Post is a single blog post
 type Post struct {
@@ -31,8 +49,8 @@ type Post struct {
 	Created        time.Time
 	Edited         time.Time
 	Tags           []string
-	ContentPreview string
-	Content        string
+	ContentPreview template.HTML
+	Content        template.HTML
 }
 
 // Tags contains all tags associated with blog posts
@@ -46,134 +64,162 @@ var PostMap map[string]*Post
 
 const port = "8080"
 
+var contact *views.View
+var index *views.View
+var post *views.View
+
 // following gorilla/mux's recommendations on best practices for
 // app server startup
 func main() {
-	var wait time.Duration
-	flag.DurationVar(&wait, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
+	var timeout time.Duration
+	flag.DurationVar(&timeout, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
 	flag.Parse()
 
-	if os.Getenv("BLOGPATH") == "" {
-		log.Fatal("environment variable BLOGPATH must be set")
+	blogUrl := os.Getenv("BLOG_REPO_URL")
+	if blogUrl == "" {
+		panic("please set BLOG_REPO_URL")
 	}
 
-	log.Println("loading files...")
-	loadFiles()
+	loadTemplates()
 
-	log.Println("configuring mux...")
-	r := mux.NewRouter()
-	r.HandleFunc("/tags", getTags)
-	r.HandleFunc("/posts", getPosts)
-	r.HandleFunc("/posts/{year}/{month}/{day}", getPost)
-	r.HandleFunc("/refresh", refresh)
-	http.Handle("/", r)
-
-	srv := &http.Server{
-		Addr:         "0.0.0.0:" + port,
-		WriteTimeout: time.Second * 15,
-		ReadTimeout:  time.Second * 15,
-		IdleTimeout:  time.Second * 60,
-		Handler:      r,
+	repoFiles, err := getRepoFileList(blogUrl)
+	if err != nil {
+		panic(err)
 	}
 
-	log.Printf("listening for requests at %s", port)
+	files, err := downloadFiles(repoFiles)
+	if err != nil {
+		panic(err)
+	}
 
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			log.Println(err)
-		}
-	}()
+	parseFiles(files)
+	sortPosts(Posts)
+	configureRoutes()
+	startServer(timeout)
+}
 
-	c := make(chan os.Signal, 1)
+func configureRoutes() {
+	log.Println("configuring routes...")
 
-	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
-	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
-	signal.Notify(c, os.Interrupt)
-
-	// Block until we receive our signal.
-	<-c
-
-	// Create a deadline to wait for.
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
-	defer cancel()
-	// Doesn't block if no connections, but will otherwise wait
-	// until the timeout deadline.
-	srv.Shutdown(ctx)
-	// Optionally, you could run srv.Shutdown in a goroutine and block on
-	// <-ctx.Done() if your application should wait for other services
-	// to finalize based on context cancellation.
-	log.Println("shutting down")
-	os.Exit(0)
+	fs := http.FileServer(http.Dir("./static"))
+	http.Handle("/static/", http.StripPrefix("/static/", fs))
+	http.HandleFunc("/", getHome)
+	http.HandleFunc("/refresh", refresh)
+	http.HandleFunc("/posts/", getPost)
 }
 
 func getPost(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
 
-	year := vars["year"]
-	if len(year) == 2 {
-		year = "20" + year
-	}
+	id := strings.TrimPrefix(r.URL.Path, "/posts/")
+	vars := strings.Split(id, "/")
 
-	month := vars["month"]
-	if len(month) == 1 {
-		month = "0" + month
-	}
+	key := fmt.Sprintf("%s-%s-%s", vars[0], vars[1], vars[2])
+	log.Printf("requested: %s\n", key)
 
-	day := vars["day"]
-	if len(day) == 1 {
-		day = "0" + day
-	}
-
-	key := fmt.Sprintf("%s-%s-%s", year, month, day)
-	log.Printf("requested: %s", key)
-
-	js, err := json.Marshal(PostMap[key])
-
+	err := post.Render(w, PostMap[key])
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write(js)
 }
 
-func getPosts(w http.ResponseWriter, r *http.Request) {
-	js, err := json.Marshal(Posts)
+const postsPerPage = 5
 
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+func getHome(w http.ResponseWriter, r *http.Request) {
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	start := page * postsPerPage
+	end := start + postsPerPage
+
+	if start > len(Posts) {
+		start = len(Posts) - 5
+	}
+	if end > len(Posts) {
+		end = len(Posts)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write(js)
+	previousPage := page - 1
+	if previousPage < 0 {
+		previousPage = 0
+	}
+
+	nextPage := page + 1
+
+	err = index.Render(w, IndexModel{
+		PreviousPage: previousPage,
+		NextPage:     nextPage,
+		Posts:        Posts[start:end],
+		Tags:         Tags,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
-func getTags(w http.ResponseWriter, r *http.Request) {
-	js, err := json.Marshal(Tags)
-
+func getContact(w http.ResponseWriter, r *http.Request) {
+	err := contact.Render(w, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
 	}
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write(js)
+func loadTemplates() {
+	log.Println("loading templates...")
+
+	index = views.NewView("bootstrap", "views/index.gohtml")
+	contact = views.NewView("bootstrap", "views/contact.gohtml")
+	post = views.NewView("bootstrap", "views/post.gohtml")
 }
 
 func refresh(w http.ResponseWriter, r *http.Request) {
-	loadFiles()
+	repoFiles, err := getRepoFileList(os.Getenv("BLOG_REPO_URL"))
+	if err != nil {
+		panic(err)
+	}
+
+	files, err := downloadFiles(repoFiles)
+	if err != nil {
+		panic(err)
+	}
+
+	parseFiles(files)
+	sortPosts(Posts)
 }
 
-func loadFiles() error {
-	files, err := ioutil.ReadDir(os.Getenv("BLOGPATH"))
+func getRepoFileList(url string) ([]RepoFile, error) {
+	log.Printf("downloading posts from %s...", url)
+
+	resp, err := http.Get(url)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	repoContents := make([]RepoFile, 0)
+	if err := json.Unmarshal(body, &repoContents); err != nil {
+		return nil, err
+	}
+
+	return repoContents, nil
+}
+
+func downloadFiles(repoFiles []RepoFile) ([]PostFile, error) {
+	files := make([]PostFile, len(repoFiles))
+	for i, f := range repoFiles {
+		resp, err := http.Get(f.DownloadUrl)
+		if err != nil {
+			log.Printf("failed to download file=[%s], err=[%v]\n", f.Name, err)
+		}
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("failed to read file=[%s], err=[%v]\n", f.Name, err)
+		}
+		files[i] = PostFile{Name: f.Name, Content: body}
+	}
+	return files, nil
+}
+
+func parseFiles(files []PostFile) error {
 
 	Posts = make([]*Post, 0)
 	PostMap = make(map[string]*Post)
@@ -184,26 +230,20 @@ func loadFiles() error {
 	// won't be encoded.
 
 	for _, f := range files {
-		if !strings.HasSuffix(f.Name(), ".md") {
-			continue
-		}
-
-		data, err := ioutil.ReadFile(os.Getenv("BLOGPATH") + "/" + f.Name())
+		metaData, bodyPreview, body, err := splitMetadata(f.Content)
 		if err != nil {
-			log.Printf("unable to read file: %s; error: %v\n", f.Name(), err)
+			log.Printf("unable to split metadata file=[%s] error=[%v]\n", f.Name, err)
 			continue
 		}
-
-		metaData, bodyPreview, body, err := splitMetadata(data)
-		if err != nil || len(metaData) == 0 {
-			log.Printf("unable to split metadata for file: %s; error: %v\n", f.Name(), err)
+		if len(metaData) == 0 {
+			log.Printf("no metadata found, skipping file=[%s]\n", f.Name)
 			continue
 		}
 
 		post := &Post{}
 		err = yaml.Unmarshal(metaData, post)
 		if err != nil {
-			log.Printf("unable to parse metadata for file: %s; error: %v\n", f.Name(), err)
+			log.Printf("unable to parse metadata for file=[%s] error=[%v]\n", f.Name, err)
 			continue
 		}
 
@@ -212,13 +252,11 @@ func loadFiles() error {
 		}
 
 		if len(bodyPreview) > 0 {
-			bodyPreview = blackfriday.Run(bodyPreview)
-			post.ContentPreview = base64.StdEncoding.EncodeToString(bodyPreview)
+			post.ContentPreview = template.HTML((blackfriday.Run(bodyPreview)))
 		}
 
-		body = blackfriday.Run(body)
 		post.Path = post.Created.Format("/posts/2006/01/02")
-		post.Content = base64.StdEncoding.EncodeToString(body)
+		post.Content = template.HTML(blackfriday.Run(body))
 
 		Posts = append(Posts, post)
 		PostMap[post.Created.Format("2006-01-02")] = post
@@ -231,12 +269,15 @@ func loadFiles() error {
 		i++
 	}
 
-	Posts = sortposts(Posts)
-
 	return nil
 }
 
-func sortposts(posts []*Post) []*Post {
+func sortPosts(posts []*Post) {
+	log.Println("sorting posts...")
+	sort(posts)
+}
+
+func sort(posts []*Post) []*Post {
 	if len(posts) < 2 {
 		return posts
 	}
@@ -256,8 +297,8 @@ func sortposts(posts []*Post) []*Post {
 
 	posts[left], posts[right] = posts[right], posts[left]
 
-	sortposts(posts[:left])
-	sortposts(posts[left+1:])
+	sort(posts[:left])
+	sort(posts[left+1:])
 
 	return posts
 }
@@ -289,4 +330,42 @@ func splitMetadata(data []byte) ([]byte, []byte, []byte, error) {
 		body = strings.TrimSpace(body)
 	}
 	return []byte(meta), []byte(bodyPreview), []byte(body), nil
+}
+
+func startServer(timeout time.Duration) {
+	srv := &http.Server{
+		Addr:         "0.0.0.0:" + port,
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.Println(err)
+		}
+	}()
+
+	c := make(chan os.Signal, 1)
+
+	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
+	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
+	signal.Notify(c, os.Interrupt)
+
+	log.Printf("listening for requests at %s", port)
+
+	// Block until we receive our signal.
+	<-c
+
+	// Create a deadline to wait for.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	// Doesn't block if no connections, but will otherwise wait
+	// until the timeout deadline.
+	srv.Shutdown(ctx)
+	// Optionally, you could run srv.Shutdown in a goroutine and block on
+	// <-ctx.Done() if your application should wait for other services
+	// to finalize based on context cancellation.
+	log.Println("shutting down")
+	os.Exit(0)
 }

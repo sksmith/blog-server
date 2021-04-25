@@ -1,0 +1,14 @@
+{{define "yield"}}
+{{range .Posts}}
+<div class="card">
+  <time datetime="{{.Created | jsdate}}">{{.Created | jsdate}}</time>
+  <h2>{{.Title}}</h2>
+  <h5>{{.Subtitle}}</h5>
+  {{.ContentPreview}}
+  <p><a href="{{.Created | postlink}}">Read More</a></p>
+</div>
+{{end}}
+
+<div><a href="/?page={{.PreviousPage}}">< Previous Page</a> -- <a href="/?page={{.NextPage}}">Next Page ></a></div>
+
+{{end}}
