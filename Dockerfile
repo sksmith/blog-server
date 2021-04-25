@@ -37,12 +37,4 @@ RUN VER=$(git describe --tag);TIM=$(date +'%Y-%m-%d_%T');SHA1=$(git rev-parse HE
       -ldflags='-w -s -extldflags "-static" -X main.AppVersion='$VER' -X main.BuildTime='$TIM' -X main.Sha1Version='$SHA1 -a \
       -o /go/bin/blog-server .
 
-RUN go get github.com/sksmith/gitwatch
-
-WORKDIR /
-
-RUN git clone https://github.com/sksmith/blog
-
-WORKDIR /blog
-
 CMD $GOPATH/src/github.com/sksmith/blog-server/run.sh

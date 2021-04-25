@@ -1,0 +1,46 @@
+{{define "bootstrap"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sean's Blog</title>
+  <link href="/static/stylesheets/main.css" rel="stylesheet">
+  <script src="/static/scripts/dateparse.js"></script>
+</head>
+
+<body onload="localizeTimes()">
+
+<div class="header">
+  <h2><a href="/">Making Sloppy Progress</a></h2>
+</div>
+
+<div class="row">
+  <div class="leftcolumn">
+  {{template "yield" .}}
+  </div>
+  <div class="rightcolumn">
+    <div class="card">
+      <h2>About Me</h2>
+      <p>
+        I'm a father of three and a software engineer for both hobby and trade. I enjoy tabletop role-playing 
+        and board games - especially of the heavily social variety! I also occasionally participate in game jams
+        with friends.
+      </p>
+      <p>
+        I'm particularly interested in self-improvement in all of those things. I enjoy progressing through a new
+        skill and learning ways of maximizing my time and focus.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Follow Me</h3>
+      <p>
+        The best way to reach me is via <a href = "mailto: ssmith2347@gmail.com">email</a>. When I'm in a coding
+        mood I've usually got some kind of personal project going on my <a href="https://github.com/sksmith">github</a>.
+      </p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
+{{end}}
